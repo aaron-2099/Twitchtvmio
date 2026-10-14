@@ -122,4 +122,25 @@
     else if (k === 'ArrowDown') window.scrollBy(0, 300);
     else if (k === 'ArrowUp') window.scrollBy(0, -300);
   }, true);
+
+  // --- aviso a la app: ¿estamos en el reproductor? (activa el modo puntero) ---
+  var lastMode = null;
+  function checkMode() {
+    var on = !!(document.fullscreenElement || document.webkitFullscreenElement);
+    if (!on) {
+      var v = document.querySelector('video');
+      if (v) {
+        var r = v.getBoundingClientRect();
+        on = r.width > 300 && r.height > 150 && r.bottom > 0 && r.top < innerHeight;
+      }
+    }
+    if (on !== lastMode) {
+      lastMode = on;
+      try { TVBridge.mode(on); } catch (_) {}
+    }
+  }
+  setInterval(checkMode, 400);
+  document.addEventListener('fullscreenchange', checkMode);
+  document.addEventListener('webkitfullscreenchange', checkMode);
+  checkMode();
 })();
