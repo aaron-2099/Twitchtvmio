@@ -72,7 +72,7 @@
     }
     try { e.focus({ preventScroll: true }); } catch (_) {}
     e.classList.add('tv-focus');
-    try { e.scrollIntoView({ block: 'center', inline: 'center' }); } catch (_) {}
+    try { e.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch (_) {}
   }
 
   document.addEventListener('focusout', function (ev) {
@@ -86,6 +86,7 @@
     var full = document.fullscreenElement || document.webkitFullscreenElement;
 
     if (k === 'Enter') {
+      if (ev.repeat) return;
       if (full && !(a && a.classList && a.classList.contains('tv-focus'))) {
         var v = document.querySelector('video');
         if (v) { ev.preventDefault(); if (v.paused) v.play(); else v.pause(); }

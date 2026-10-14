@@ -21,6 +21,7 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
+import android.widget.Toast;
 
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
@@ -44,6 +45,10 @@ public class MainActivity extends Activity {
     private float cx = -1, cy = -1;
     private float density = 1f;
     private int cursorSize = 40;
+    private boolean autoMode = false;       // lo que detecta la web (¿estamos en el reproductor?)
+    private Boolean manualMode = null;      // lo que elige el usuario con OK mantenido
+    private boolean okLong = false;
+    private boolean okStartedInCursor = false;
 
     private static class CursorView extends View {
         private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -71,7 +76,9 @@ public class MainActivity extends Activity {
             runOnUiThread(new Runnable() {
                 @Override
                 public void run() {
-                    setCursorMode(on);
+                    autoMode = on;
+                    manualMode = null;
+                    applyMode();
                 }
             });
         }
@@ -147,6 +154,8 @@ public class MainActivity extends Activity {
 
         web.requestFocus();
         web.loadUrl(START_URL);
+        Toast.makeText(this, "TwitchUnblock v1.1 - mantén OK para activar/desactivar el puntero",
+                Toast.LENGTH_LONG).show();
     }
 
     private void hideCustom() {
@@ -165,6 +174,11 @@ public class MainActivity extends Activity {
 
     private View target() {
         return customView != null ? customView : web;
+    }
+
+    private void applyMode() {
+        boolean eff = manualMode != null ? manualMode : autoMode;
+        setCursorMode(eff);
     }
 
     private void setCursorMode(boolean on) {
@@ -249,18 +263,38 @@ public class MainActivity extends Activity {
 
     @Override
     public boolean dispatchKeyEvent(KeyEvent e) {
+        int k = e.getKeyCode();
+        boolean ok = k == KeyEvent.KEYCODE_DPAD_CENTER || k == KeyEvent.KEYCODE_ENTER
+                || k == KeyEvent.KEYCODE_NUMPAD_ENTER;
+        if (ok) {
+            int act = e.getAction();
+            if (act == KeyEvent.ACTION_DOWN) {
+                if (e.getRepeatCount() == 0) {
+                    okLong = false;
+                    okStartedInCursor = cursorMode;
+                } else if (e.getRepeatCount() == 1 && !okLong) {
+                    // OK mantenido: activar / desactivar el puntero a mano
+                    okLong = true;
+                    manualMode = !cursorMode;
+                    applyMode();
+                    Toast.makeText(this, cursorMode ? "Puntero activado" : "Puntero desactivado",
+                            Toast.LENGTH_SHORT).show();
+                }
+                if (okStartedInCursor || okLong) return true;
+            } else if (act == KeyEvent.ACTION_UP) {
+                boolean consume = okStartedInCursor || okLong;
+                if (okStartedInCursor && !okLong) clickCursor();
+                okStartedInCursor = false;
+                okLong = false;
+                if (consume) return true;
+            }
+            return super.dispatchKeyEvent(e);
+        }
         if (cursorMode) {
-            int k = e.getKeyCode();
             boolean dpad = k == KeyEvent.KEYCODE_DPAD_UP || k == KeyEvent.KEYCODE_DPAD_DOWN
                     || k == KeyEvent.KEYCODE_DPAD_LEFT || k == KeyEvent.KEYCODE_DPAD_RIGHT;
-            boolean ok = k == KeyEvent.KEYCODE_DPAD_CENTER || k == KeyEvent.KEYCODE_ENTER
-                    || k == KeyEvent.KEYCODE_NUMPAD_ENTER;
             if (dpad) {
                 if (e.getAction() == KeyEvent.ACTION_DOWN) moveCursor(k, e.getRepeatCount());
-                return true;
-            }
-            if (ok) {
-                if (e.getAction() == KeyEvent.ACTION_DOWN && e.getRepeatCount() == 0) clickCursor();
                 return true;
             }
         }
