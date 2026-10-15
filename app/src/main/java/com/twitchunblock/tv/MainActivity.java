@@ -20,19 +20,15 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
-import android.widget.Toast;
 
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 
 public class MainActivity extends Activity {
 
-    private static final String VERSION = "1.4";
+    private static final String VERSION = "1.6";
     private static final float TARGET_CSS_WIDTH = 1600f;
     private static final String START_URL = "https://test2-fawn-eta.vercel.app";
-    private static final String DESKTOP_UA =
-            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
-                    + "Chrome/124.0.0.0 Safari/537.36";
 
     private WebView web;
     private FrameLayout root;
@@ -41,6 +37,7 @@ public class MainActivity extends Activity {
     private String tvScript = "";
     private FrameLayout scaledHost;
     private float viewK = 1f;
+    private String chromeVer = "?";
     private int cssW = 0, cssH = 0;
 
     // ---- modo puntero: el puntero lo dibuja y maneja la propia página (tv.js) ----
@@ -119,7 +116,15 @@ public class MainActivity extends Activity {
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
         s.setMediaPlaybackRequiresUserGesture(false);
-        s.setUserAgentString(DESKTOP_UA);
+        // User-Agent de escritorio con la MISMA versión de Chrome que tiene el WebView de la TV
+        // (un número de versión inventado y viejo hace que Twitch diga "navegador desactualizado").
+        String ver = "130";
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("Chrome/(\\d+)")
+                .matcher(WebSettings.getDefaultUserAgent(this));
+        if (m.find()) ver = m.group(1);
+        chromeVer = ver;
+        s.setUserAgentString("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
+                + "Chrome/" + ver + ".0.0.0 Safari/537.36");
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
         s.setSupportZoom(false);
         s.setBuiltInZoomControls(false);
@@ -171,8 +176,6 @@ public class MainActivity extends Activity {
 
         web.requestFocus();
         web.loadUrl(START_URL);
-        Toast.makeText(this, "TwitchUnblock v" + VERSION + " - vista " + cssW + "x" + cssH
-                + " - mantén OK para activar/desactivar el puntero", Toast.LENGTH_LONG).show();
     }
 
     private void hideCustom() {
@@ -234,8 +237,6 @@ public class MainActivity extends Activity {
                     okLong = true;
                     manualMode = !cursorMode;
                     applyMode();
-                    Toast.makeText(this, cursorMode ? "Puntero activado" : "Puntero desactivado",
-                            Toast.LENGTH_SHORT).show();
                 }
                 if (okStartedInCursor || okLong) return true;
             } else if (act == KeyEvent.ACTION_UP) {
