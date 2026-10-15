@@ -9,7 +9,8 @@
     '::-webkit-scrollbar{display:none !important;width:0 !important;height:0 !important;}' +
     'html,body{overflow-x:hidden !important;}' +
     ':fullscreen video{object-fit:contain !important;}' +
-    ':-webkit-full-screen video{object-fit:contain !important;}';
+    ':-webkit-full-screen video{object-fit:contain !important;}' +
+    '.tv-fs video{object-fit:contain !important;}';
   document.head.appendChild(style);
 
   var SEL = 'a[href],button,input,select,textarea,summary,[tabindex],[role="button"],' +
@@ -134,7 +135,7 @@
   var cur = { x: innerWidth / 2, y: innerHeight / 2, on: false, el: null, hideT: null, last: null };
 
   function host() {
-    return document.fullscreenElement || document.webkitFullscreenElement || document.body;
+    return document.body;
   }
 
   function ensureCur() {
@@ -251,6 +252,83 @@
       if (cur.el) cur.el.style.display = 'none';
     }
   };
+
+  // =====================================================================
+  //  Pantalla completa simulada
+  //  El WebView solo deja entrar en pantalla completa con un toque real, y nuestros
+  //  clics son simulados. Así que la pantalla completa se hace dentro de la página:
+  //  el elemento ocupa toda la ventana (que ya es toda la pantalla de la TV).
+  // =====================================================================
+  var fs = { el: null, saved: [], htmlOverflow: null };
+  var RESET = { 'transform': 'none', 'filter': 'none', 'perspective': 'none', 'contain': 'none',
+                'will-change': 'auto', 'backdrop-filter': 'none', 'clip-path': 'none' };
+  var FSSTYLE = { 'position': 'fixed', 'left': '0', 'top': '0', 'right': '0', 'bottom': '0',
+                  'width': '100vw', 'height': '100vh', 'max-width': 'none', 'max-height': 'none',
+                  'margin': '0', 'z-index': '2147483646', 'background': '#000', 'transform': 'none' };
+
+  function fsFire(el) {
+    ['fullscreenchange', 'webkitfullscreenchange'].forEach(function (n) {
+      try { (el || document).dispatchEvent(new Event(n, { bubbles: true })); } catch (_) {}
+    });
+  }
+
+  function fsNotify() {
+    try { TVBridge.fs(!!fs.el); } catch (_) {}
+    checkMode();
+    if (cur.on) showCur();
+  }
+
+  function fsEnter(el) {
+    if (fs.el === el) return;
+    if (fs.el) fsExit();
+    fs.el = el;
+    fs.saved = [];
+    var n = el;
+    while (n && n !== document.body && n !== document.documentElement) {
+      fs.saved.push([n, n.getAttribute('style')]);
+      if (n !== el) {
+        for (var k in RESET) n.style.setProperty(k, RESET[k], 'important');
+      }
+      n = n.parentElement;
+    }
+    for (var s in FSSTYLE) el.style.setProperty(s, FSSTYLE[s], 'important');
+    el.classList.add('tv-fs');
+    fs.htmlOverflow = document.documentElement.getAttribute('style');
+    document.documentElement.style.setProperty('overflow', 'hidden', 'important');
+    fsFire(el);
+    fsNotify();
+  }
+
+  function fsExit() {
+    var el = fs.el;
+    if (!el) return Promise.resolve();
+    fs.el = null;
+    fs.saved.forEach(function (pair) {
+      if (pair[1] === null) pair[0].removeAttribute('style');
+      else pair[0].setAttribute('style', pair[1]);
+    });
+    fs.saved = [];
+    el.classList.remove('tv-fs');
+    if (fs.htmlOverflow === null) document.documentElement.removeAttribute('style');
+    else document.documentElement.setAttribute('style', fs.htmlOverflow);
+    fsFire(el);
+    fsNotify();
+    return Promise.resolve();
+  }
+
+  function defGetter(obj, name, fn) {
+    try { Object.defineProperty(obj, name, { get: fn, configurable: true }); } catch (_) {}
+  }
+  var ep = Element.prototype, dp = Document.prototype;
+  ep.requestFullscreen = ep.webkitRequestFullscreen = function () { fsEnter(this); return Promise.resolve(); };
+  defGetter(dp, 'fullscreenElement', function () { return fs.el; });
+  defGetter(dp, 'webkitFullscreenElement', function () { return fs.el; });
+  defGetter(dp, 'webkitCurrentFullScreenElement', function () { return fs.el; });
+  defGetter(dp, 'fullscreenEnabled', function () { return true; });
+  defGetter(dp, 'webkitFullscreenEnabled', function () { return true; });
+  defGetter(dp, 'webkitIsFullScreen', function () { return !!fs.el; });
+  dp.exitFullscreen = dp.webkitExitFullscreen = dp.webkitCancelFullScreen = function () { return fsExit(); };
+  window.__tvExitFs = function () { if (fs.el) { fsExit(); return true; } return false; };
 
   function onFsChange() {
     if (cur.on) showCur();

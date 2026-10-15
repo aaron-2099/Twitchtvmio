@@ -13,6 +13,7 @@ import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
+import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
@@ -26,7 +27,7 @@ import java.io.InputStream;
 
 public class MainActivity extends Activity {
 
-    private static final String VERSION = "1.3";
+    private static final String VERSION = "1.4";
     private static final float TARGET_CSS_WIDTH = 1600f;
     private static final String START_URL = "https://test2-fawn-eta.vercel.app";
     private static final String DESKTOP_UA =
@@ -48,6 +49,7 @@ public class MainActivity extends Activity {
     private Boolean manualMode = null;      // lo que elige el usuario con OK mantenido
     private boolean okLong = false;
     private boolean okStartedInCursor = false;
+    private boolean fsActive = false;       // pantalla completa simulada dentro de la página
 
     private class Bridge {
         @JavascriptInterface
@@ -58,6 +60,16 @@ public class MainActivity extends Activity {
                     autoMode = on;
                     manualMode = null;
                     applyMode();
+                }
+            });
+        }
+
+        @JavascriptInterface
+        public void fs(final boolean on) {
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    fsActive = on;
                 }
             });
         }
@@ -132,6 +144,7 @@ public class MainActivity extends Activity {
 
             @Override
             public void onPageFinished(WebView view, String url) {
+                fsActive = false;
                 view.evaluateJavascript(tvScript, null);
             }
         });
@@ -258,6 +271,20 @@ public class MainActivity extends Activity {
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         switch (keyCode) {
             case KeyEvent.KEYCODE_BACK:
+                if (fsActive) {
+                    web.evaluateJavascript(
+                            "window.__tvExitFs?(window.__tvExitFs()?'1':'0'):'0'",
+                            new ValueCallback<String>() {
+                                @Override
+                                public void onReceiveValue(String v) {
+                                    if (!"\"1\"".equals(v)) {
+                                        fsActive = false;
+                                        if (web.canGoBack()) web.goBack();
+                                    }
+                                }
+                            });
+                    return true;
+                }
                 if (customView != null) {
                     hideCustom();
                     return true;
