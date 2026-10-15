@@ -5,7 +5,11 @@
   var style = document.createElement('style');
   style.textContent =
     '.tv-focus{outline:4px solid #a970ff !important;outline-offset:3px !important;' +
-    'box-shadow:0 0 0 8px rgba(169,112,255,.35) !important;border-radius:6px;}';
+    'box-shadow:0 0 0 8px rgba(169,112,255,.35) !important;border-radius:6px;}' +
+    '::-webkit-scrollbar{display:none !important;width:0 !important;height:0 !important;}' +
+    'html,body{overflow-x:hidden !important;}' +
+    ':fullscreen video{object-fit:contain !important;}' +
+    ':-webkit-full-screen video{object-fit:contain !important;}';
   document.head.appendChild(style);
 
   var SEL = 'a[href],button,input,select,textarea,summary,[tabindex],[role="button"],' +
@@ -261,7 +265,7 @@
       var v = document.querySelector('video');
       if (v) {
         var r = v.getBoundingClientRect();
-        on = r.width > 300 && r.height > 150 && r.bottom > 0 && r.top < innerHeight;
+        on = r.width > innerWidth * 0.45 && r.height > innerHeight * 0.3 && r.bottom > 0 && r.top < innerHeight;
       }
     }
     if (on !== lastMode) {

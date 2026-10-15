@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.graphics.Color;
 import android.os.Bundle;
 import android.os.SystemClock;
+import android.util.DisplayMetrics;
 import android.view.InputDevice;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
@@ -25,7 +26,8 @@ import java.io.InputStream;
 
 public class MainActivity extends Activity {
 
-    private static final String VERSION = "1.2";
+    private static final String VERSION = "1.3";
+    private static final float TARGET_CSS_WIDTH = 1600f;
     private static final String START_URL = "https://test2-fawn-eta.vercel.app";
     private static final String DESKTOP_UA =
             "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -36,6 +38,9 @@ public class MainActivity extends Activity {
     private View customView;
     private WebChromeClient.CustomViewCallback customCallback;
     private String tvScript = "";
+    private FrameLayout scaledHost;
+    private float viewK = 1f;
+    private int cssW = 0, cssH = 0;
 
     // ---- modo puntero: el puntero lo dibuja y maneja la propia página (tv.js) ----
     private boolean cursorMode = false;
@@ -62,7 +67,7 @@ public class MainActivity extends Activity {
             runOnUiThread(new Runnable() {
                 @Override
                 public void run() {
-                    sendHover((float) (fx * root.getWidth()), (float) (fy * root.getHeight()));
+                    sendHover((float) fx, (float) fy);
                 }
             });
         }
@@ -78,8 +83,24 @@ public class MainActivity extends Activity {
         root.setBackgroundColor(Color.BLACK);
         web = new WebView(this);
         web.setBackgroundColor(Color.BLACK);
-        root.addView(web, new FrameLayout.LayoutParams(
+
+        // La web se dibuja en una "pantalla virtual" más grande (viewK veces) y se reduce
+        // para que quepa: así se ve como en un monitor de PC y no con zoom.
+        DisplayMetrics dm = getResources().getDisplayMetrics();
+        float density = dm.density;
+        viewK = Math.max(1f, TARGET_CSS_WIDTH / (dm.widthPixels / density));
+        int hw = Math.round(dm.widthPixels * viewK);
+        int hh = Math.round(dm.heightPixels * viewK);
+        cssW = Math.round(hw / density);
+        cssH = Math.round(hh / density);
+        scaledHost = new FrameLayout(this);
+        scaledHost.setPivotX(0f);
+        scaledHost.setPivotY(0f);
+        scaledHost.setScaleX(1f / viewK);
+        scaledHost.setScaleY(1f / viewK);
+        scaledHost.addView(web, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        root.addView(scaledHost, new FrameLayout.LayoutParams(hw, hh));
         setContentView(root);
 
         WebSettings s = web.getSettings();
@@ -92,6 +113,9 @@ public class MainActivity extends Activity {
         s.setBuiltInZoomControls(false);
         s.setDisplayZoomControls(false);
         s.setTextZoom(100);
+        web.setVerticalScrollBarEnabled(false);
+        web.setHorizontalScrollBarEnabled(false);
+        web.setOverScrollMode(View.OVER_SCROLL_NEVER);
 
         CookieManager cm = CookieManager.getInstance();
         cm.setAcceptCookie(true);
@@ -122,7 +146,7 @@ public class MainActivity extends Activity {
                 customView = view;
                 customCallback = callback;
                 web.setVisibility(View.GONE);
-                root.addView(view, new FrameLayout.LayoutParams(
+                scaledHost.addView(view, new FrameLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
             }
 
@@ -134,13 +158,13 @@ public class MainActivity extends Activity {
 
         web.requestFocus();
         web.loadUrl(START_URL);
-        Toast.makeText(this, "TwitchUnblock v" + VERSION
+        Toast.makeText(this, "TwitchUnblock v" + VERSION + " - vista " + cssW + "x" + cssH
                 + " - mantén OK para activar/desactivar el puntero", Toast.LENGTH_LONG).show();
     }
 
     private void hideCustom() {
         if (customView == null) return;
-        root.removeView(customView);
+        scaledHost.removeView(customView);
         customView = null;
         web.setVisibility(View.VISIBLE);
         if (customCallback != null) customCallback.onCustomViewHidden();
@@ -158,7 +182,10 @@ public class MainActivity extends Activity {
     }
 
     /** Mueve el ratón "de verdad" (hover) para que funcionen los controles que salen al pasar el ratón. */
-    private void sendHover(float x, float y) {
+    private void sendHover(float fx, float fy) {
+        View t = customView != null ? customView : web;
+        float x = fx * t.getWidth();
+        float y = fy * t.getHeight();
         MotionEvent.PointerProperties[] pp = new MotionEvent.PointerProperties[1];
         pp[0] = new MotionEvent.PointerProperties();
         pp[0].id = 0;
@@ -170,7 +197,6 @@ public class MainActivity extends Activity {
         long now = SystemClock.uptimeMillis();
         MotionEvent ev = MotionEvent.obtain(now, now, MotionEvent.ACTION_HOVER_MOVE, 1, pp, pc,
                 0, 0, 1f, 1f, 0, 0, InputDevice.SOURCE_MOUSE, 0);
-        View t = customView != null ? customView : web;
         t.dispatchGenericMotionEvent(ev);
         ev.recycle();
     }
