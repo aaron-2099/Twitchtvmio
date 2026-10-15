@@ -124,6 +124,135 @@
     else if (k === 'ArrowUp') window.scrollBy(0, -300);
   }, true);
 
+  // =====================================================================
+  //  Puntero (modo ratón) dibujado y manejado por la propia página
+  // =====================================================================
+  var cur = { x: innerWidth / 2, y: innerHeight / 2, on: false, el: null, hideT: null, last: null };
+
+  function host() {
+    return document.fullscreenElement || document.webkitFullscreenElement || document.body;
+  }
+
+  function ensureCur() {
+    if (!cur.el) {
+      var d = document.createElement('div');
+      d.id = 'tv-cursor';
+      d.style.cssText = 'position:fixed;left:0;top:0;width:24px;height:24px;margin:-12px 0 0 -12px;' +
+        'border-radius:50%;background:#fff;border:3px solid #9146ff;box-sizing:border-box;' +
+        'z-index:2147483647;pointer-events:none;display:none;transition:opacity .25s;';
+      cur.el = d;
+    }
+    var h = host();
+    if (cur.el.parentNode !== h) h.appendChild(cur.el);
+    return cur.el;
+  }
+
+  function showCur() {
+    var e = ensureCur();
+    e.style.display = 'block';
+    e.style.opacity = '1';
+    e.style.left = cur.x + 'px';
+    e.style.top = cur.y + 'px';
+    clearTimeout(cur.hideT);
+    cur.hideT = setTimeout(function () { if (cur.el) cur.el.style.opacity = '0'; }, 3000);
+  }
+
+  function fire(el, type, extra) {
+    var o = { bubbles: true, cancelable: true, view: window, clientX: cur.x, clientY: cur.y,
+              screenX: cur.x, screenY: cur.y, button: 0, buttons: 0,
+              pointerId: 1, pointerType: 'mouse', isPrimary: true };
+    if (extra) for (var k in extra) o[k] = extra[k];
+    var ev;
+    try {
+      ev = type.indexOf('pointer') === 0 ? new PointerEvent(type, o) : new MouseEvent(type, o);
+    } catch (_) {
+      ev = new MouseEvent(type, o);
+    }
+    el_dispatch(el, ev);
+  }
+  function el_dispatch(el, ev) { try { el.dispatchEvent(ev); } catch (_) {} }
+
+  function hoverUpdate() {
+    var t = document.elementFromPoint(cur.x, cur.y);
+    if (!t) return null;
+    if (t !== cur.last) {
+      if (cur.last) {
+        fire(cur.last, 'pointerout', { relatedTarget: t });
+        fire(cur.last, 'mouseout', { relatedTarget: t });
+        fire(cur.last, 'mouseleave', { bubbles: false, relatedTarget: t });
+      }
+      fire(t, 'pointerover', { relatedTarget: cur.last });
+      fire(t, 'mouseover', { relatedTarget: cur.last });
+      fire(t, 'mouseenter', { bubbles: false, relatedTarget: cur.last });
+      cur.last = t;
+    }
+    fire(t, 'pointermove');
+    fire(t, 'mousemove');
+    return t;
+  }
+
+  function scrollAt(sign) {
+    var t = document.elementFromPoint(cur.x, cur.y);
+    var amt = sign * Math.max(120, innerHeight * 0.25);
+    while (t && t !== document.body && t !== document.documentElement) {
+      var cs = getComputedStyle(t);
+      if (/(auto|scroll)/.test(cs.overflowY) && t.scrollHeight > t.clientHeight + 2) {
+        var before = t.scrollTop;
+        t.scrollTop += amt;
+        if (t.scrollTop !== before) return;
+      }
+      t = t.parentElement;
+    }
+    window.scrollBy(0, amt);
+  }
+
+  window.__tvCur = function (dir, rep) {
+    if (!cur.on) return;
+    var step = Math.max(10, innerWidth * 0.012) * (1 + Math.min(rep || 0, 20) * 0.25);
+    var oy = cur.y;
+    if (dir === 'left') cur.x -= step;
+    else if (dir === 'right') cur.x += step;
+    else if (dir === 'up') cur.y -= step;
+    else if (dir === 'down') cur.y += step;
+    cur.x = Math.max(0, Math.min(cur.x, innerWidth - 1));
+    cur.y = Math.max(0, Math.min(cur.y, innerHeight - 1));
+    if ((dir === 'up' || dir === 'down') && cur.y === oy) scrollAt(dir === 'up' ? -1 : 1);
+    showCur();
+    hoverUpdate();
+    try { TVBridge.hover(cur.x / innerWidth, cur.y / innerHeight); } catch (_) {}
+  };
+
+  window.__tvCurClick = function () {
+    if (!cur.on) return;
+    showCur();
+    var t = hoverUpdate();
+    if (!t) return;
+    fire(t, 'pointerdown', { buttons: 1 });
+    fire(t, 'mousedown', { buttons: 1 });
+    try {
+      var f = t.closest ? t.closest('input,textarea,select,button,a,[tabindex]') : null;
+      (f || t).focus();
+    } catch (_) {}
+    fire(t, 'pointerup');
+    fire(t, 'mouseup');
+    fire(t, 'click');
+  };
+
+  window.__tvCursorMode = function (on) {
+    cur.on = !!on;
+    if (cur.on) {
+      showCur();
+    } else {
+      clearTimeout(cur.hideT);
+      if (cur.el) cur.el.style.display = 'none';
+    }
+  };
+
+  function onFsChange() {
+    if (cur.on) showCur();
+    checkMode();
+  }
+
   // --- aviso a la app: ¿estamos en el reproductor? (activa el modo puntero) ---
   var lastMode = null;
   function checkMode() {
@@ -141,7 +270,7 @@
     }
   }
   setInterval(checkMode, 400);
-  document.addEventListener('fullscreenchange', checkMode);
-  document.addEventListener('webkitfullscreenchange', checkMode);
+  document.addEventListener('fullscreenchange', onFsChange);
+  document.addEventListener('webkitfullscreenchange', onFsChange);
   checkMode();
 })();

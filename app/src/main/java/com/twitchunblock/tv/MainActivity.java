@@ -1,10 +1,7 @@
 package com.twitchunblock.tv;
 
 import android.app.Activity;
-import android.content.Context;
-import android.graphics.Canvas;
 import android.graphics.Color;
-import android.graphics.Paint;
 import android.os.Bundle;
 import android.os.SystemClock;
 import android.view.InputDevice;
@@ -28,6 +25,7 @@ import java.io.InputStream;
 
 public class MainActivity extends Activity {
 
+    private static final String VERSION = "1.2";
     private static final String START_URL = "https://test2-fawn-eta.vercel.app";
     private static final String DESKTOP_UA =
             "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -39,36 +37,12 @@ public class MainActivity extends Activity {
     private WebChromeClient.CustomViewCallback customCallback;
     private String tvScript = "";
 
-    // ---- modo ratón (puntero) para la pantalla del reproductor ----
-    private CursorView cursorView;
+    // ---- modo puntero: el puntero lo dibuja y maneja la propia página (tv.js) ----
     private boolean cursorMode = false;
-    private float cx = -1, cy = -1;
-    private float density = 1f;
-    private int cursorSize = 40;
     private boolean autoMode = false;       // lo que detecta la web (¿estamos en el reproductor?)
     private Boolean manualMode = null;      // lo que elige el usuario con OK mantenido
     private boolean okLong = false;
     private boolean okStartedInCursor = false;
-
-    private static class CursorView extends View {
-        private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint stroke = new Paint(Paint.ANTI_ALIAS_FLAG);
-
-        CursorView(Context c, float density) {
-            super(c);
-            fill.setColor(Color.WHITE);
-            stroke.setColor(Color.parseColor("#9146FF"));
-            stroke.setStyle(Paint.Style.STROKE);
-            stroke.setStrokeWidth(3 * density);
-        }
-
-        @Override
-        protected void onDraw(Canvas canvas) {
-            float r = getWidth() / 2f;
-            canvas.drawCircle(r, r, r - 4, fill);
-            canvas.drawCircle(r, r, r - 4, stroke);
-        }
-    }
 
     private class Bridge {
         @JavascriptInterface
@@ -82,6 +56,16 @@ public class MainActivity extends Activity {
                 }
             });
         }
+
+        @JavascriptInterface
+        public void hover(final double fx, final double fy) {
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    sendHover((float) (fx * root.getWidth()), (float) (fy * root.getHeight()));
+                }
+            });
+        }
     }
 
     @Override
@@ -89,8 +73,6 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         tvScript = readAsset("tv.js");
-        density = getResources().getDisplayMetrics().density;
-        cursorSize = (int) (26 * density);
 
         root = new FrameLayout(this);
         root.setBackgroundColor(Color.BLACK);
@@ -98,11 +80,6 @@ public class MainActivity extends Activity {
         web.setBackgroundColor(Color.BLACK);
         root.addView(web, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-
-        cursorView = new CursorView(this, density);
-        root.addView(cursorView, new FrameLayout.LayoutParams(cursorSize, cursorSize));
-        cursorView.setVisibility(View.GONE);
-
         setContentView(root);
 
         WebSettings s = web.getSettings();
@@ -111,6 +88,10 @@ public class MainActivity extends Activity {
         s.setMediaPlaybackRequiresUserGesture(false);
         s.setUserAgentString(DESKTOP_UA);
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
+        s.setSupportZoom(false);
+        s.setBuiltInZoomControls(false);
+        s.setDisplayZoomControls(false);
+        s.setTextZoom(100);
 
         CookieManager cm = CookieManager.getInstance();
         cm.setAcceptCookie(true);
@@ -143,7 +124,6 @@ public class MainActivity extends Activity {
                 web.setVisibility(View.GONE);
                 root.addView(view, new FrameLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-                cursorView.bringToFront();
             }
 
             @Override
@@ -154,8 +134,8 @@ public class MainActivity extends Activity {
 
         web.requestFocus();
         web.loadUrl(START_URL);
-        Toast.makeText(this, "TwitchUnblock v1.1 - mantén OK para activar/desactivar el puntero",
-                Toast.LENGTH_LONG).show();
+        Toast.makeText(this, "TwitchUnblock v" + VERSION
+                + " - mantén OK para activar/desactivar el puntero", Toast.LENGTH_LONG).show();
     }
 
     private void hideCustom() {
@@ -172,93 +152,31 @@ public class MainActivity extends Activity {
     // Puntero
     // ------------------------------------------------------------------
 
-    private View target() {
-        return customView != null ? customView : web;
-    }
-
     private void applyMode() {
-        boolean eff = manualMode != null ? manualMode : autoMode;
-        setCursorMode(eff);
+        cursorMode = manualMode != null ? manualMode : autoMode;
+        web.evaluateJavascript("window.__tvCursorMode&&window.__tvCursorMode(" + cursorMode + ")", null);
     }
 
-    private void setCursorMode(boolean on) {
-        if (on == cursorMode) return;
-        cursorMode = on;
-        if (on) {
-            if (cx < 0) {
-                cx = root.getWidth() / 2f;
-                cy = root.getHeight() / 2f;
-            }
-            placeCursor();
-            cursorView.setVisibility(View.VISIBLE);
-            cursorView.bringToFront();
-            sendMouse(MotionEvent.ACTION_HOVER_MOVE, cx, cy, 0, 0L, 0f);
-        } else {
-            cursorView.setVisibility(View.GONE);
-        }
-    }
-
-    private void placeCursor() {
-        cursorView.setX(cx - cursorSize / 2f);
-        cursorView.setY(cy - cursorSize / 2f);
-    }
-
-    private void sendMouse(int action, float x, float y, int buttons, long downTime, float vscroll) {
+    /** Mueve el ratón "de verdad" (hover) para que funcionen los controles que salen al pasar el ratón. */
+    private void sendHover(float x, float y) {
         MotionEvent.PointerProperties[] pp = new MotionEvent.PointerProperties[1];
         pp[0] = new MotionEvent.PointerProperties();
         pp[0].id = 0;
         pp[0].toolType = MotionEvent.TOOL_TYPE_MOUSE;
-
         MotionEvent.PointerCoords[] pc = new MotionEvent.PointerCoords[1];
         pc[0] = new MotionEvent.PointerCoords();
         pc[0].x = x;
         pc[0].y = y;
-        pc[0].size = 1f;
-        pc[0].pressure = (buttons != 0) ? 1f : 0f;
-        if (action == MotionEvent.ACTION_SCROLL) {
-            pc[0].setAxisValue(MotionEvent.AXIS_VSCROLL, vscroll);
-        }
-
         long now = SystemClock.uptimeMillis();
-        MotionEvent ev = MotionEvent.obtain(downTime > 0 ? downTime : now, now, action, 1, pp, pc,
-                0, buttons, 1f, 1f, 0, 0, InputDevice.SOURCE_MOUSE, 0);
-        View t = target();
-        if (action == MotionEvent.ACTION_HOVER_MOVE || action == MotionEvent.ACTION_SCROLL) {
-            t.dispatchGenericMotionEvent(ev);
-        } else {
-            t.dispatchTouchEvent(ev);
-        }
+        MotionEvent ev = MotionEvent.obtain(now, now, MotionEvent.ACTION_HOVER_MOVE, 1, pp, pc,
+                0, 0, 1f, 1f, 0, 0, InputDevice.SOURCE_MOUSE, 0);
+        View t = customView != null ? customView : web;
+        t.dispatchGenericMotionEvent(ev);
         ev.recycle();
     }
 
-    private void moveCursor(int keyCode, int repeat) {
-        float step = (14 + Math.min(repeat, 20) * 3) * density;
-        float ox = cx, oy = cy;
-        switch (keyCode) {
-            case KeyEvent.KEYCODE_DPAD_LEFT:  cx -= step; break;
-            case KeyEvent.KEYCODE_DPAD_RIGHT: cx += step; break;
-            case KeyEvent.KEYCODE_DPAD_UP:    cy -= step; break;
-            case KeyEvent.KEYCODE_DPAD_DOWN:  cy += step; break;
-            default: break;
-        }
-        cx = Math.max(0, Math.min(cx, root.getWidth() - 1));
-        cy = Math.max(0, Math.min(cy, root.getHeight() - 1));
-        placeCursor();
-
-        boolean vertical = keyCode == KeyEvent.KEYCODE_DPAD_UP || keyCode == KeyEvent.KEYCODE_DPAD_DOWN;
-        if (vertical && cy == oy) {
-            // el puntero ya está en el borde: desplazar la página (como la rueda del ratón)
-            sendMouse(MotionEvent.ACTION_SCROLL, cx, cy, 0, 0L,
-                    keyCode == KeyEvent.KEYCODE_DPAD_UP ? 1f : -1f);
-        } else {
-            sendMouse(MotionEvent.ACTION_HOVER_MOVE, cx, cy, 0, 0L, 0f);
-        }
-    }
-
-    private void clickCursor() {
-        long down = SystemClock.uptimeMillis();
-        sendMouse(MotionEvent.ACTION_DOWN, cx, cy, MotionEvent.BUTTON_PRIMARY, down, 0f);
-        sendMouse(MotionEvent.ACTION_UP, cx, cy, 0, down, 0f);
+    private void cursorKey(String dir, int repeat) {
+        web.evaluateJavascript("window.__tvCur&&window.__tvCur('" + dir + "'," + repeat + ")", null);
     }
 
     @Override
@@ -283,7 +201,9 @@ public class MainActivity extends Activity {
                 if (okStartedInCursor || okLong) return true;
             } else if (act == KeyEvent.ACTION_UP) {
                 boolean consume = okStartedInCursor || okLong;
-                if (okStartedInCursor && !okLong) clickCursor();
+                if (okStartedInCursor && !okLong) {
+                    web.evaluateJavascript("window.__tvCurClick&&window.__tvCurClick()", null);
+                }
                 okStartedInCursor = false;
                 okLong = false;
                 if (consume) return true;
@@ -291,10 +211,13 @@ public class MainActivity extends Activity {
             return super.dispatchKeyEvent(e);
         }
         if (cursorMode) {
-            boolean dpad = k == KeyEvent.KEYCODE_DPAD_UP || k == KeyEvent.KEYCODE_DPAD_DOWN
-                    || k == KeyEvent.KEYCODE_DPAD_LEFT || k == KeyEvent.KEYCODE_DPAD_RIGHT;
-            if (dpad) {
-                if (e.getAction() == KeyEvent.ACTION_DOWN) moveCursor(k, e.getRepeatCount());
+            String dir = null;
+            if (k == KeyEvent.KEYCODE_DPAD_UP) dir = "up";
+            else if (k == KeyEvent.KEYCODE_DPAD_DOWN) dir = "down";
+            else if (k == KeyEvent.KEYCODE_DPAD_LEFT) dir = "left";
+            else if (k == KeyEvent.KEYCODE_DPAD_RIGHT) dir = "right";
+            if (dir != null) {
+                if (e.getAction() == KeyEvent.ACTION_DOWN) cursorKey(dir, e.getRepeatCount());
                 return true;
             }
         }
